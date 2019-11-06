@@ -1,6 +1,7 @@
 <?php
 
 require_once('config.php');
+require_once('class/SimpleXMLElementEx.php');
 require_once('util.php');
 require_once('class/item.php');
 require_once('class/image.php');
@@ -77,6 +78,10 @@ for($i = 0; $i < 2; $i++) {
   $item->images[] = $image; // 商品に画像をセット
 }
 
+// 動画HTML設定
+// R-Cabinet上で表示されるタグをそのまま挿入。
+$item->movieUrl = '<script src="//stream.cms.rakuten.co.jp/gate/play/?w=320&h=286&mid=0000000000&vid=0000000000000" type="text/javascript"></script>';
+
 // 説明文関連設定
 $item->descriptionForPC = '結構html使える' . '_' . date_format(new DateTime('now', new DateTimeZone('Asia/Tokyo')), 'YmdHis');
 $item->descriptionForMobile = '一部html使用可能' . '_' . date_format(new DateTime('now', new DateTimeZone('Asia/Tokyo')), 'YmdHis');
@@ -142,19 +147,53 @@ function updateItem($item) {
 * 注意. xmlの要素の順番を変えると400でwrong formatエラーが返却されるクソ仕様。
 *       item.getでxmlの要素の順番を確認しながら行うと無難(API仕様書でも良いが間違ってないという保証はない)
 */
-function _createRequestXml($item) {
-
-  // リクエストXMLのガワを作る
-  $rootXml = new SimpleXMLElement('<?xml version="1.0" encoding="UTF-8"?><request/>');
-  $itemInsertRequestXml = $rootXml->addChild('itemUpdateRequest');
-  $itemXml = $itemInsertRequestXml->addChild('item');
-  
-  // 受け取った商品情報オブジェクトをarrayに変換
-  $array = _convertClassObjectToArray($item);
-  
-  _arrayToXml($array, $itemXml);  // リクエストのXMLをarray情報から作成する
-  
-  return $rootXml->asXML(); // リクエストのXMLを返却する
+function _createRequestXml($item)
+{
+   
+   // リクエストXMLのガワを作る
+   $rootXml = new SimpleXMLElementEx('<?xml version="1.0" encoding="UTF-8"?><request/>');
+   $itemInsertRequestXml = $rootXml->addChild('itemUpdateRequest');
+   $itemXml = $itemInsertRequestXml->addChild('item');
+   
+   // 受け取った商品情報オブジェクトをarrayに変換
+   $array = _convertClassObjectToArray($item);
+   
+   // リクエストのXMLをarray情報から作成する
+   //_arrayToXml($array, $itemXml);
+   foreach ($array as $key => $value) {
+	  // 特定タグの場合の挙動
+	  if ((string)$key === 'tagIds') {
+		 var_dump($key);
+		 $tagIds = $value;
+		 $tagIdXml = $itemXml->addChild('tagIds');
+		 foreach ($tagIds as $tagId) {
+			$tagIdXml->addChild('tagId', $tagId);
+		 }
+		 continue;
+	  }
+	  // 動画HTMLの場合
+      // 楽天の仕様でCDATA反映の為
+	  if ((string)$key === 'movieUrl') {
+		 $itemXml->addChild('movieUrl')->setCData($value);
+		 continue;
+	  }
+	  
+	  if (is_array($value)) {
+		 if (is_int($key)) {
+			if (!empty($parentKeyName)) {
+			   // 親要素が存在する時、子要素を親要素の単数形の名前にして登録
+			   $key = singularByPlural($parentKeyName);
+			}
+		 }
+		 $label = $itemXml->addChild($key);
+		 _arrayToXml($value, $label, $key);
+	  } elseif (!is_null($value)) {
+		 // 値がセットされている時だけxml要素に追加
+		 $itemXml->addChild($key, $value);
+	  }
+   }
+   
+   return $rootXml->asXML(); // リクエストのXMLを返却する
 }
 
 /**
@@ -175,6 +214,7 @@ function _arrayToXml($array, &$xml, $parentKeyName=null){
       }
       continue;
     }
+    
     if(is_array($value)){
       if(is_int($key)){
           if(!empty($parentKeyName)) {
@@ -184,8 +224,7 @@ function _arrayToXml($array, &$xml, $parentKeyName=null){
       }
       $label = $xml->addChild($key);
       _arrayToXml($value, $label, $key);
-    }
-    else if(!is_null($value)){
+    } elseif(!is_null($value)){
       // 値がセットされている時だけxml要素に追加
       $xml->addChild($key, $value);
     }
